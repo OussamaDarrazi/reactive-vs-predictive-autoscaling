@@ -18,7 +18,7 @@ SALT = b"study_salt"
 
 
 @app.get("/cpu")
-def cpu(payload: str | None = Query(default=None)):
+def cpu(payload: str | None = Query(default=None), iterations: int = Query(default=CPU_ITERATIONS)):
     """"""
     message = payload or "default_payload"
 
@@ -26,7 +26,7 @@ def cpu(payload: str | None = Query(default=None)):
         "sha256",
         message.encode(),
         SALT,
-        CPU_ITERATIONS
+        iterations
     )
 
     return {
