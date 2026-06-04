@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 ############################
 # COLORS
@@ -28,18 +28,84 @@ APP_DIR="./app"
 KUBECONFIG_PATH="$HOME/.kube/config"
 
 ############################
+# HELPERS
+############################
+
+# Poll a condition command until it succeeds or retries run out.
+# Usage: wait_for <retries> <sleep_sec> <description> <command...>
+wait_for() {
+  local retries=$1 interval=$2 desc=$3
+  shift 3
+  local i=0
+  until "$@" >/dev/null 2>&1; do
+    i=$(( i + 1 ))
+    if [ "$i" -ge "$retries" ]; then
+      log_error "Timed out waiting for: ${desc}"
+      return 1
+    fi
+    log_info "Waiting for ${desc} (attempt ${i}/${retries})..."
+    sleep "$interval"
+  done
+  log_success "${desc} is ready"
+}
+
+############################
 # DOCKER INSTALL (IDEMPOTENT)
 ############################
 install_docker() {
   if command -v docker >/dev/null 2>&1; then
     log_success "Docker already installed"
+
+    # Ensure the daemon is running
+    if ! sudo systemctl is-active --quiet docker; then
+      log_info "Docker installed but not running, starting..."
+      sudo systemctl start docker
+      log_success "Docker daemon started"
+    fi
     return
   fi
 
   log_info "Installing Docker..."
   curl -fsSL https://get.docker.com | sh
-  sudo usermod -aG docker $USER || true
-  log_success "Docker installed"
+  sudo usermod -aG docker "$USER" || true
+  sudo systemctl enable --now docker
+  log_success "Docker installed and started"
+}
+
+############################
+# DOCKER INSECURE REGISTRY
+############################
+configure_docker_insecure_registry() {
+  local cfg="/etc/docker/daemon.json"
+
+  if sudo test -f "$cfg" && sudo grep -q "${REGISTRY_ADDR}" "$cfg" 2>/dev/null; then
+    log_success "Docker insecure registry already configured"
+    return
+  fi
+
+  log_info "Configuring Docker insecure registry for ${REGISTRY_ADDR}..."
+
+  # Merge into existing daemon.json if present, otherwise create fresh
+  if sudo test -f "$cfg"; then
+    local existing
+    existing=$(sudo cat "$cfg")
+    # Append insecure-registries key; requires jq — fall back to overwrite if absent
+    if command -v jq >/dev/null 2>&1; then
+      echo "$existing" \
+        | jq --arg reg "${REGISTRY_ADDR}" \
+            '.["insecure-registries"] += [$reg] | .["insecure-registries"] |= unique' \
+        | sudo tee "$cfg" > /dev/null
+    else
+      log_warn "jq not found — overwriting daemon.json (existing content preserved as .bak)"
+      sudo cp "$cfg" "${cfg}.bak"
+      echo "{\"insecure-registries\":[\"${REGISTRY_ADDR}\"]}" | sudo tee "$cfg" > /dev/null
+    fi
+  else
+    echo "{\"insecure-registries\":[\"${REGISTRY_ADDR}\"]}" | sudo tee "$cfg" > /dev/null
+  fi
+
+  sudo systemctl restart docker
+  log_success "Docker daemon restarted with insecure registry config"
 }
 
 ############################
@@ -50,21 +116,23 @@ start_registry() {
     if docker ps --format '{{.Names}}' | grep -q "^${REGISTRY_NAME}$"; then
       log_success "Registry already running"
     else
-      log_info "Starting existing registry container..."
-      docker start ${REGISTRY_NAME}
+      log_info "Registry container exists but is stopped, starting..."
+      docker start "${REGISTRY_NAME}"
       log_success "Registry started"
     fi
-    return
+  else
+    log_info "Creating local Docker registry..."
+    docker run -d \
+      --restart=always \
+      -p "${REGISTRY_PORT}:5000" \
+      --name "${REGISTRY_NAME}" \
+      registry:2
+    log_success "Registry created at ${REGISTRY_ADDR}"
   fi
 
-  log_info "Creating local Docker registry..."
-  docker run -d \
-    --restart=always \
-    -p ${REGISTRY_PORT}:5000 \
-    --name ${REGISTRY_NAME} \
-    registry:2
-
-  log_success "Registry created at ${REGISTRY_ADDR}"
+  # Wait until the registry API is actually reachable before continuing
+  wait_for 15 2 "registry HTTP API" \
+    curl -sf "http://${REGISTRY_ADDR}/v2/"
 }
 
 ############################
@@ -73,6 +141,12 @@ start_registry() {
 install_k3s() {
   if command -v k3s >/dev/null 2>&1; then
     log_success "K3s already installed"
+
+    if ! sudo systemctl is-active --quiet k3s; then
+      log_info "K3s installed but not running, starting..."
+      sudo systemctl start k3s
+      log_success "K3s service started"
+    fi
     return
   fi
 
@@ -87,41 +161,59 @@ install_k3s() {
 configure_registry() {
   sudo mkdir -p /etc/rancher/k3s
 
-  REG_FILE="/etc/rancher/k3s/registries.yaml"
+  local reg_file="/etc/rancher/k3s/registries.yaml"
 
-  if sudo test -f "$REG_FILE" && sudo grep -q "${REGISTRY_ADDR}" "$REG_FILE"; then
-    log_success "Registry already configured in k3s"
+  if sudo test -f "$reg_file" && sudo grep -q "${REGISTRY_ADDR}" "$reg_file"; then
+    log_success "K3s registry already configured"
     return
   fi
 
-  log_info "Configuring k3s registry..."
-
-  sudo tee "$REG_FILE" > /dev/null <<EOF
+  log_info "Writing k3s registry config..."
+  sudo tee "$reg_file" > /dev/null <<EOF
 mirrors:
   "${REGISTRY_ADDR}":
     endpoint:
       - "http://${REGISTRY_ADDR}"
 EOF
 
-  sudo systemctl restart k3s
-  log_success "k3s restarted with registry config"
+  # Restart if running, otherwise just start — registry config is read at startup
+  if sudo systemctl is-active --quiet k3s; then
+    log_info "Restarting k3s to apply registry config..."
+    sudo systemctl restart k3s
+  else
+    log_info "Starting k3s..."
+    sudo systemctl start k3s
+  fi
+
+  log_success "K3s restarted with registry config"
 }
 
 ############################
 # KUBECTL CONFIG
 ############################
 setup_kubeconfig() {
-  mkdir -p $HOME/.kube
+  mkdir -p "$HOME/.kube"
 
   if [ -f "$KUBECONFIG_PATH" ]; then
     log_success "kubeconfig already exists"
-  else
-    sudo cp /etc/rancher/k3s/k3s.yaml $KUBECONFIG_PATH
-    sudo chown $(id -u):$(id -g) $KUBECONFIG_PATH
-    log_success "kubeconfig configured"
+    export KUBECONFIG="$KUBECONFIG_PATH"
+    return
   fi
 
-  export KUBECONFIG=$KUBECONFIG_PATH
+  # k3s.yaml is written only after the API server is fully up — wait for it
+  log_info "Waiting for k3s to write kubeconfig..."
+  wait_for 20 3 "k3s kubeconfig file" \
+    sudo test -f /etc/rancher/k3s/k3s.yaml
+
+  sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG_PATH"
+  sudo chown "$(id -u):$(id -g)" "$KUBECONFIG_PATH"
+  log_success "kubeconfig configured"
+
+  export KUBECONFIG="$KUBECONFIG_PATH"
+
+  # Also wait until the API server actually responds before moving on
+  wait_for 20 3 "Kubernetes API server" \
+    kubectl cluster-info
 }
 
 ############################
@@ -138,16 +230,64 @@ install_helm() {
   log_success "Helm installed"
 }
 
+# Add a Helm repo if not already present, and always refresh its cache.
 helm_repo() {
   local name=$1
   local url=$2
 
-  if helm repo list | grep -q "$name"; then
-    log_success "Helm repo '$name' already exists"
+  # `helm repo list` exits 1 with "no repositories" on a clean system — swallow that
+  if helm repo list 2>/dev/null | grep -q "^${name}[[:space:]]"; then
+    log_success "Helm repo '${name}' already exists"
   else
     helm repo add "$name" "$url"
-    log_success "Added Helm repo: $name"
+    log_success "Added Helm repo: ${name}"
   fi
+
+  # Always update this repo's index so installs don't use a stale cache
+  helm repo update "$name"
+}
+
+############################
+# HELM RELEASE INSTALLER
+# Handles deployed / failed / pending releases gracefully.
+############################
+helm_install() {
+  local release=$1
+  local chart=$2
+  local namespace=$3
+  shift 3
+  # Remaining args are extra flags passed directly to helm install
+
+  local status
+  status=$(helm status "$release" -n "$namespace" --output json 2>/dev/null \
+           | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "not-found")
+
+  case "$status" in
+    deployed)
+      log_success "Helm release '${release}' already deployed in namespace '${namespace}'"
+      return
+      ;;
+    failed|pending-install|pending-upgrade|pending-rollback)
+      log_warn "Release '${release}' is in '${status}' state — uninstalling before retry..."
+      helm uninstall "$release" -n "$namespace" || true
+      # Give Kubernetes a moment to clean up CRDs / webhooks
+      sleep 5
+      ;;
+    not-found)
+      : # Fresh install — nothing to clean up
+      ;;
+    *)
+      log_warn "Unknown release status '${status}' for '${release}' — attempting install anyway"
+      ;;
+  esac
+
+  log_info "Installing Helm release '${release}' from chart '${chart}'..."
+  helm install "$release" "$chart" \
+    --namespace "$namespace" \
+    --create-namespace \
+    "$@"
+
+  log_success "Helm release '${release}' installed in namespace '${namespace}'"
 }
 
 ############################
@@ -155,17 +295,9 @@ helm_repo() {
 ############################
 install_monitoring() {
   helm_repo prometheus-community https://prometheus-community.github.io/helm-charts
-
-  if helm list -n monitoring | grep -q kube-prometheus-stack; then
-    log_success "Prometheus stack already installed"
-    return
-  fi
-
-  log_info "Installing Prometheus stack..."
-  helm install monitoring prometheus-community/kube-prometheus-stack \
-    --namespace monitoring --create-namespace
-
-  log_success "Prometheus stack installed"
+  helm_install monitoring \
+    prometheus-community/kube-prometheus-stack \
+    monitoring
 }
 
 ############################
@@ -173,36 +305,34 @@ install_monitoring() {
 ############################
 install_keda() {
   helm_repo kedacore https://kedacore.github.io/charts
-
-  if helm list -n keda | grep -q keda; then
-    log_success "KEDA already installed"
-    return
-  fi
-
-  log_info "Installing KEDA..."
-  helm install keda kedacore/keda \
-    --namespace keda --create-namespace
-
-  log_success "KEDA installed"
+  helm_install keda \
+    kedacore/keda \
+    keda
 }
 
 ############################
 # BUILD & PUSH API IMAGE
 ############################
 build_and_push_api() {
-  if docker images | grep -q "${APP_NAME}"; then
-    log_warn "Image already exists locally (rebuilding skipped if unchanged)"
+  # Guard: ensure the build context actually exists
+  if [ ! -d "$APP_DIR" ]; then
+    log_error "APP_DIR '${APP_DIR}' does not exist — cannot build image"
+    exit 1
   fi
 
   log_info "Building API image..."
-  docker build -t ${APP_NAME}:latest ${APP_DIR}
+  docker build -t "${APP_NAME}:latest" "${APP_DIR}"
   log_success "Built ${APP_NAME}:latest"
 
-  docker tag ${APP_NAME}:latest ${REGISTRY_ADDR}/${APP_NAME}:latest
-  log_success "Tagged for registry"
+  docker tag "${APP_NAME}:latest" "${REGISTRY_ADDR}/${APP_NAME}:latest"
+  log_success "Tagged for local registry"
+
+  # Registry must be reachable before pushing (it may have just been started)
+  wait_for 15 2 "registry HTTP API" \
+    curl -sf "http://${REGISTRY_ADDR}/v2/"
 
   log_info "Pushing to local registry..."
-  docker push ${REGISTRY_ADDR}/${APP_NAME}:latest
+  docker push "${REGISTRY_ADDR}/${APP_NAME}:latest"
   log_success "Image pushed: ${REGISTRY_ADDR}/${APP_NAME}:latest"
 }
 
@@ -211,6 +341,7 @@ build_and_push_api() {
 ############################
 main() {
   install_docker
+  configure_docker_insecure_registry
   start_registry
   install_k3s
   configure_registry
