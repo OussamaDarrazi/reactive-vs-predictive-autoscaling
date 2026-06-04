@@ -23,7 +23,7 @@ REGISTRY_PORT=5000
 REGISTRY_ADDR="localhost:${REGISTRY_PORT}"
 
 APP_NAME="workload-api"
-APP_DIR="./app"
+APP_DIR="./api"
 
 KUBECONFIG_PATH="$HOME/.kube/config"
 
