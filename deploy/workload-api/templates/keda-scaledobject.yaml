@@ -1,0 +1,19 @@
+{{ - if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: workload-api
+spec:
+  scaleTargetRef:
+    name: workload-api
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: {{ .Values.keda.prometheus.serverAddress }}
+      metricName: workload_metric
+      threshold: {{ .Values.keda.prometheus.threshold }}
+      query: |
+{{ .Values.keda.prometheus.query | indent 8 }}
+{{- end }}

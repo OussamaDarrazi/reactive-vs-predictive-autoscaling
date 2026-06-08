@@ -1,0 +1,23 @@
+# This is the default values.yaml file for the workload-api chart.
+# the default values are for a mono pod deployment of the workload-api dedicated for the ramp test.
+image:
+  repository: localhost:5000/workload-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+
+service:
+  port: 8000
+
+ingress:
+  enabled: true
+  path: /
+
+keda:
+  enabled: false
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  prometheus:
+    serverAddress: http://prometheus-server.monitoring.svc:9090
+    query: ""
+    threshold: "10"

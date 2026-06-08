@@ -1,0 +1,9 @@
+keda:
+  enabled: true
+  minReplicaCount: 1
+  maxReplicaCount: 15
+  prometheus:
+    serverAddress: http://prometheus-server.monitoring.svc:9090
+    threshold: "100"
+    query: |
+      predicted_requests_total{app="workload-api"}
