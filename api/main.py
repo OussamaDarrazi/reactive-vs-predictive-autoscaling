@@ -4,9 +4,10 @@ import binascii
 import os
 import time
 import numpy as np
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI()
-
+Instrumentator().instrument(app).expose(app)
 
 # constants
 CPU_ITERATIONS = int(os.getenv("CPU_ITERATIONS", "1000000"))
