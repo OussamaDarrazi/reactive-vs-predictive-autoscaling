@@ -151,7 +151,7 @@ install_k3s() {
   fi
 
   log_info "Installing k3s..."
-  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -
+  curl -sfL https://get.k3s.io | sh -
   log_success "K3s installed"
 }
 
