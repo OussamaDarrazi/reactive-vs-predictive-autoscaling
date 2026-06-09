@@ -7,4 +7,5 @@ spec:
   ports:
     - port: 8000
       targetPort: 8000
-  selector: workload-api
+  selector:
+    app: workload-api
