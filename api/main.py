@@ -10,9 +10,9 @@ app = FastAPI()
 Instrumentator().instrument(app).expose(app)
 
 # constants
-CPU_ITERATIONS = int(os.getenv("CPU_ITERATIONS", "1000000"))
-MEMORY_MB = int(os.getenv("MEMORY_MB", "100"))
-MATRIX_SIZE = int(os.getenv("MATRIX_SIZE", "300"))
+CPU_ITERATIONS = int(os.getenv("CPU_ITERATIONS", "100000"))
+MEMORY_MB = int(os.getenv("MEMORY_MB", "1"))
+MATRIX_SIZE = int(os.getenv("MATRIX_SIZE", "1000"))
 
 SALT = b"study_salt"
 
@@ -45,7 +45,7 @@ def memory(size_mb: int = Query(default=MEMORY_MB)):
     for i in range(0, len(block), 4096):
         block[i] = 1
 
-    time.sleep(0.2)
+    time.sleep(0.1)
 
     return {"allocated_mb": size_mb}
 

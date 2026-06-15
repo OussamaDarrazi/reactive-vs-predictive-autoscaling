@@ -1,8 +1,8 @@
 #!/bin/bash
 
-export CPU_ITERATIONS=1000000
-export MEMORY_MB=100
-export MATRIX_SIZE=300
+export CPU_ITERATIONS=100000
+export MEMORY_MB=1
+export MATRIX_SIZE=1000
 
 # prevent BLAS thread oversubscription
 export OMP_NUM_THREADS=1
