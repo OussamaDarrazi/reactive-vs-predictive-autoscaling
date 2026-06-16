@@ -25,7 +25,6 @@ REGISTRY_ADDR="localhost:${REGISTRY_PORT}"
 APP_NAME="workload-api"
 APP_DIR="./api"
 
-KUBECONFIG_PATH="$HOME/.kube/config"
 
 ############################
 # HELPERS
@@ -151,7 +150,8 @@ install_k3s() {
   fi
 
   log_info "Installing k3s..."
-  curl -sfL https://get.k3s.io | sh -
+    curl -sfL https://get.k3s.io | \
+    INSTALL_K3S_EXEC='server --node-taint ""' sh -
   log_success "K3s installed"
 }
 
@@ -192,28 +192,10 @@ EOF
 # KUBECTL CONFIG
 ############################
 setup_kubeconfig() {
-  mkdir -p "$HOME/.kube"
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-  if [ -f "$KUBECONFIG_PATH" ]; then
-    log_success "kubeconfig already exists"
-    export KUBECONFIG="$KUBECONFIG_PATH"
-    return
-  fi
-
-  # k3s.yaml is written only after the API server is fully up — wait for it
-  log_info "Waiting for k3s to write kubeconfig..."
-  wait_for 20 3 "k3s kubeconfig file" \
-    sudo test -f /etc/rancher/k3s/k3s.yaml
-
-  sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG_PATH"
-  sudo chown "$(id -u):$(id -g)" "$KUBECONFIG_PATH"
-  log_success "kubeconfig configured"
-
-  export KUBECONFIG="$KUBECONFIG_PATH"
-
-  # Also wait until the API server actually responds before moving on
-  wait_for 20 3 "Kubernetes API server" \
-    kubectl cluster-info
+    wait_for 20 3 "Kubernetes API server" \
+        kubectl cluster-info
 }
 
 ############################
