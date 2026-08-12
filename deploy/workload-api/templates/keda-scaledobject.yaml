@@ -13,7 +13,7 @@ spec:
     metadata:
       serverAddress: {{ .Values.keda.prometheus.serverAddress }}
       metricName: workload_metric
-      threshold: {{ .Values.keda.prometheus.threshold }}
+      threshold: {{ .Values.keda.prometheus.threshold | quote}}
       query: |
 {{ .Values.keda.prometheus.query | indent 8 }}
 {{- end }}
