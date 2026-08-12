@@ -6,4 +6,4 @@ class WorkloadUser(HttpUser):
 
 	@task
 	def matmul(self):
-		self.client.get("/matmul")
+		self.client.get("/matmul?size=500")
