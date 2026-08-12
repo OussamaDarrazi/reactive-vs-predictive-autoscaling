@@ -1,7 +1,7 @@
 from locust import HttpUser, task, constant_throughput
 
-class WorkloadUser(HttpUser):
-	wait_time = constant_throughput(1)  # 1 request per second
+class CpuWorkloadUser(HttpUser):
+	wait_time = constant_throughput(1)
 
 	@task
 	def cpu(self):

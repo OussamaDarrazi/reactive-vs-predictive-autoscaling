@@ -1,9 +1,8 @@
 from locust import HttpUser, task, constant_throughput
 
-
-class WorkloadUser(HttpUser):
+class MemoryWorkloadUser(HttpUser):
 	wait_time = constant_throughput(1)
 
 	@task
-	def matmul(self):
-		self.client.get("/matmul?size=500")
+	def memory(self):
+		self.client.get("/memory")
