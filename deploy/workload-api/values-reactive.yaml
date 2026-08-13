@@ -3,7 +3,7 @@ keda:
   minReplicaCount: 1
   maxReplicaCount: 15
   prometheus:
-    serverAddress: http://prometheus-server.monitoring.svc:9090
-    threshold: "100"
+    serverAddress: http://prometheus-operated.monitoring.svc:9090
+    threshold: "50"
     query: |
       sum(rate(http_requests_total{app="workload-api"}[1m]))
