@@ -1,4 +1,4 @@
-SATURATION_RPS = int(25*.8)  # 80% of the threshold RPS
+SATURATION_RPS = int(60*.8)  # 80% of the threshold RPS
 SPAWN_RATE = SATURATION_RPS  # VUs per second
 CYCLE_TIME = 15 * 60
 
