@@ -6,4 +6,4 @@ keda:
     serverAddress: http://prometheus-operated.monitoring.svc:9090
     threshold: "50"
     query: |
-      sum(rate(http_requests_total{app="workload-api"}[1m]))
+      sum(rate(http_requests_total{service="workload-api"}[1m]))
