@@ -3,17 +3,28 @@ from locust import LoadTestShape
 import math
 import random
 
+
 class RandomBursty(LoadTestShape):
+
+    MIN_RPS_MULTIPLIER = 0.5
+    MAX_RPS_MULTIPLIER = 1.5
+
+    BURST_MULTIPLIER = 4.0
+    BURST_PROBABILITY = 0.2
 
     def __init__(self):
         super().__init__()
 
         self.random = random.Random(42)
 
-        self.current_level = MIN_RPS
+        self.min_rps = self.MIN_RPS_MULTIPLIER * SATURATION_RPS
+        self.max_rps = self.MAX_RPS_MULTIPLIER * SATURATION_RPS
+
+        self.current_level = self.min_rps
         self.level_start_time = 0
 
         self.level_duration = CYCLE_TIME / 7
+
     def tick(self):
         elapsed = self.get_run_time()
 
@@ -39,23 +50,29 @@ class RandomBursty(LoadTestShape):
         This assumes approximately one VU generates one RPS.
         """
         return max(1, math.ceil(target_rps))
-    
+
     def get_target_rps(self, elapsed):
         """
-        Randomly selects workload levels with a preference
-        toward high-intensity bursts.
+        Selects a random workload level and keeps it constant
+        for one plateau interval.
 
-        Each selected level is held for the same derived
-        duration, giving the autoscaler time to respond.
+        A burst plateau (4T) is selected with a fixed probability.
         """
 
         if elapsed - self.level_start_time >= self.level_duration:
 
-            self.current_level = self.random.choices(
-                LOAD_LEVELS,
-                weights=(4, 3, 2, 1),
-                k=1,
-            )[0]
+            if self.random.random() < self.BURST_PROBABILITY:
+
+                self.current_level = (
+                    self.BURST_MULTIPLIER * SATURATION_RPS
+                )
+
+            else:
+
+                self.current_level = self.random.uniform(
+                    self.min_rps,
+                    self.max_rps,
+                )
 
             self.level_start_time = elapsed
 

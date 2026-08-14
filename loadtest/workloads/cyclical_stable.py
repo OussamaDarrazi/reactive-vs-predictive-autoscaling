@@ -2,7 +2,20 @@ from .config import *
 from locust import LoadTestShape
 import math
 
+
 class CyclicalStable(LoadTestShape):
+
+    MIN_RPS_MULTIPLIER = 0.75
+    MAX_RPS_MULTIPLIER = 2.0
+
+    def __init__(self):
+        super().__init__()
+
+        min_rps = self.MIN_RPS_MULTIPLIER * SATURATION_RPS
+        max_rps = self.MAX_RPS_MULTIPLIER * SATURATION_RPS
+
+        self.sine_offset = (min_rps + max_rps) / 2
+        self.sine_amplitude = (max_rps - min_rps) / 2
 
     def tick(self):
         elapsed = self.get_run_time()
@@ -23,28 +36,9 @@ class CyclicalStable(LoadTestShape):
 
     @staticmethod
     def rps_to_users(target_rps):
-        """
-        Converts target RPS into VUs.
-
-        This assumes approximately one VU generates one RPS.
-        """
         return max(1, math.ceil(target_rps))
-    
+
     def get_target_rps(self, elapsed):
-        """
-        Each 15-minute cycle moves gradually through:
-
-            0.5S > 1.5S > 2.5S > 3.5S
-            > 2.5S > 1.5S > 0.5S
-
-        The transitions are smooth rather than abrupt.
-        """
-
-        phase = (elapsed % CYCLE_TIME) / CYCLE_TIME
-
-        # Triangular wave between 0 and 1.
-        triangle = 1 - abs(2 * phase - 1)
-
-        return MIN_RPS + triangle * (
-            MAX_RPS - MIN_RPS
+        return self.sine_offset + self.sine_amplitude * math.sin(
+            2 * math.pi * elapsed / CYCLE_TIME
         )
